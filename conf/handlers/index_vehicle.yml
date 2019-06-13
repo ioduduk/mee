@@ -1,0 +1,79 @@
+# 两个下划线开头的配置节，只作为yaml中的引用使用，便于配置文件的编写
+__nested_vehicle_monitor: &vehicle_monitors
+    -
+        key: "vehicle_monitor"
+        database: "track_service"
+        table: "vehicle_monitor"
+        document_id: "vehicle_monitor_%id"
+
+        # nested的配置节。
+        # 注意到statement中的 %__parent.id，
+        # 含义是父配置节所对应mysql行数据中的id字段。
+        statement: "select * from vehicle_monitor where id > %__last.id:(0) and car_id = %__parent.id and status = 1"
+        filter:
+            status: 1
+        query: 
+            monitor_id: "%id"
+
+        # parent_query，只会出现在nested的配置节中。
+        # 当nested配置节对应的mysql行数据发生变化时，
+        # 需要通过parent_query来构造es的查询参数。
+        parent_query: 
+            vehicle_id: "%car_id"
+        mapping:
+            -
+                db_field: "id"
+                es_field: "monitor_id"
+            - "monitor_status"
+            - "monitor_type"
+
+index_vehicle: 
+    vehicle:
+        -
+            key: "vehicle"
+            database: "certify_service"
+            table: "vehicle"
+            statement: "select * from vehicle where id > %__last.id:(0)"
+            document_id: "vehicle_%id"
+            mapping:
+                -
+                    db_field: "id"
+                    es_field: "vehicle_id"
+                - "created_at"
+                - "updated_at"
+                - "vehicle_type_id"
+                -
+                    db_field: "status"
+                    es_field: "vehicle_status"
+
+                # 在本示例中，业务上要求一辆车可以有多个监控方式。
+                # 因此，对于一条主表记录（车的记录），对应着多条的监控方式记录。
+                # 此时，我们使用nested类型。
+                # nested的含义和es中的nested type一致。
+                -
+                    db_field: *vehicle_monitors
+                    es_field: "vehicle_monitors"
+                    type: "nested"
+        -
+            key: "vehicle_type"
+            database: "certify_service"
+            table: "vehicle_type"
+            statement: "select * from vehicle_type where id = %__master.vehicle_type_id"
+            query: 
+                vehicle_type_id: "%id"
+            mapping:
+                -
+                    db_field: "name"
+                    es_field: "vehicle_type_name"
+        -
+            key: "relation_captain_vehicle"
+            database: "carteam_service"
+            table: "relation_captain_vehicle"
+            statement: "select * from relation_captain_vehicle where vehicle_id = %__master.id and status = 1"
+            query: 
+                vehicle_id: "%vehicle_id"
+            filter:
+                status: 1
+            mapping:
+                - "captain_id"
+                - "carteam_id"

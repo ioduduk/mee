@@ -1,0 +1,3 @@
+# 同时引用多个同步配置文件
+- !include includes/index_carteam_user.yml
+- !include includes/index_vehicle.yml

@@ -1,0 +1,181 @@
+index_carteam_user: # index alias
+    user: # type name
+        -
+            # 配置节的唯一标识，在其它配置节中，可以通过该唯一标识引用到配置节对应的mysql行数据
+            key: "users"
+
+            # 数据库名称。mee通过该名称到应用配置文件中查找相关的数据库连接信息
+            database: "carteam_service"
+
+            # 数据表名称
+            table: "users"
+
+            # 写入到ElasticSearch的文档ID。
+            # 特别注意的是，对于一个ES索引配置文件，document_id配置项必须并只能在一个配置节中出现，
+            # 这个配置节我们称之为主配置节，主配置节中的mysql table我们称之为主表。
+            # 换而言之，一个ES索引，有且仅有一个主表。
+            document_id: "carteam_user_%id"
+
+            # 从mysql中查询数据的SQL语句。
+            # 注意到有一个特殊的字符串：%__last.id:(0)，%__last表示上次查询到的主表的行数据。
+            # id通常是主表中的主键，目前我们只支持单一主键，不支持联合主键。
+            # 0: 表示上次查询的结果为空时（通常是第一次查询）的默认值
+            # 全量更新时，mee的运行机制是根据主表的主键，从默认值开始，每次取出一条记录，
+            # 然后联合其它的配置节构造ES的文档，最后写入ES。
+            # 我们还可以看到，statement还可以存在主键以外的where子句。
+            statement: "select * from users where id > %__last.id:(0) and role_id = 1"
+
+            # 写入ES文档时的routing参数。
+            # 可以看到，这里和document_id配置项一样，有个 % 开头的字符串。
+            # mee在运行时，遇到类似 %id 的配置值时，会把当前正在处理的mysql行数据的id字段的值替换 %id。
+            # 全量更新时，mysql行数据就是从根据statement的查询结果；
+            # 增量更新时，mysql行数据就是从binlog消息解析出来的结果。
+            routing: "%id"
+
+            # 这个配置项用来过滤不相干的binlog消息。
+            # 以当前例子说明，当某条insert类型的binlog中role_id不等于1时，则忽略该binlog。
+            # TODO：filter的配置可以从statement中的where子句解析出来。
+            filter:
+                role_id: 1
+
+            # 定义了mysql字段和es字段的映射关系
+            mapping:
+                # 如果mysql中的字段名和es中的字段名不一样，可以使用以下格式
+                -
+                    db_field: "id"
+                    es_field: "user_id"
+
+                # 如果mysql中的字段名和es中的字段名一样，可以简化为以下格式   
+                - "created_at"
+                - "updated_at"
+                - 
+                    db_field: "name"
+                    es_field: "user_name"
+                - 
+                    db_field: "mobile"
+                    es_field: "user_mobile"
+        -
+            # key的取值可以和table的取值不一致，但必须保持唯一
+            key: "relations_1"
+            database: "carteam_service"
+            table: "auditor_relations"
+
+            # statement的值，通常有一个隐含的约束：执行statement时，查询结果最多只有一条记录。
+            # 为什么这么设计？主要是考虑到在增量更新时，我们每次只能处理一条binlog，
+            # 因此为减少复杂度，在全量更新时，我们也要求每个配置节只关联到一条行记录。
+            # 如果真的无法避免多条记录，有两个方法可以考虑：
+            # 1) 对同一个表，使用多个配置节，不同配置节中的statement赋予不同的where条件;
+            # 2) 使用nested类型
+            statement: "select * from auditor_relations where user_id = %__master.id and status = 1 and role = 1"
+            filter:
+                status: 1
+                role: 1
+                
+            # 当处理binlog消息时，需要根据query配置项构造ES的查询参数
+            query: 
+                user_id: "%user_id"
+            mapping:
+                - 
+                    db_field: "auditor_id"
+                    es_field: "rco_id"
+                - 
+                    db_field: "op_id"
+                    es_field: "rco_op_id"
+        -
+            # 这个配置节就是“对同一个表，使用多个配置节”的示例。
+            # 与relations_1相比，都是carteam_service.auditor_relations，但statement中的where子句不一样。
+            key: "relations_2"
+            database: "carteam_service"
+            table: "auditor_relations"
+            statement: "select * from auditor_relations where user_id = %__master.id and status = 1 and role = 2"
+            filter:
+                status: 1
+                role: 2
+            query: 
+                user_id: "%user_id"
+            mapping:
+                - 
+                    db_field: "auditor_id"
+                    es_field: "rcm_id"
+                - 
+                    db_field: "op_id"
+                    es_field: "rcm_op_id"
+        -
+            key: "admin_users"
+            database: "admin_service"
+            table: "users"
+
+            # 注意到%relations_1.auditor_id:(0)
+            # 它的含义是用配置节relations_1对应的mysql行数据中的auditor_id来替换上述字符串，
+            # 如果relations_1对应的mysql行数据为空，则使用括号之间的默认值 0
+            statement: "select * from users where id = %relations_1.auditor_id:(0)"
+            query: 
+                rco_id: "%id"
+            mapping:
+                - 
+                    db_field: "name"
+                    es_field: "auditor_name"
+                - 
+                    db_field: "phone"
+                    es_field: "auditor_mobile"
+        -
+            key: "credit"
+            database: "carteam_service"
+            table: "credit"
+            statement: "select * from credit where user_id = %__master.id and status = 0"
+            filter:
+                status: 0
+            query: 
+                user_id: "%user_id"
+            mapping:
+
+                # 如果mysql和es的字段名一致，也可以使用 field: "<field_name>" 的格式来定义。
+                # null_value的含义是当mysql对应的行数据为空时，使用null_value指定的值来写入ES。
+                - 
+                    field: "credit_line"
+                    null_value: 0
+
+                # db_field也支持一些简单与业务无关的函数计算。
+                # 下面的例子的含义是：
+                # loanable_amount = min(credit_line, reward_line+event_line) - loan_amount
+                - 
+                    db_field: "sum(min(credit_line, sum(reward_line,event_line)), -loan_amount)"
+                    es_field: "loanable_amount"
+                    null_value: 0
+        -
+            key: "loan_base"
+            database: "carteam_service"
+            table: "loan_base"
+
+            # 虽然我们隐式要求statement的查询结果最多只能有一条，
+            # 但是，在某些统计类的场景下，虽然查询结果有多条，
+            # 但只要我们保证在配置节中所用到的列，在多条查询结果中值是唯一的，
+            # mee也可以处理。
+            # 例如，在本例子中，当前配置节用到的列主要是 user_id (在query 以及 db_field中用到)。
+            statement: "select * from loan_base where user_id = %__master.id and status in (100, 101, 102)"
+            filter:
+                status: 
+                    - 100
+                    - 101
+                    - 102
+            query: 
+                user_id: "%user_id"
+            mapping:
+
+                # db_field还可以使用executeSQL函数和echo函数执行统计类的SQL语句。
+                # echo函数的作用是原样输出参数字符串。
+                # 需要注意的是，此类SQL语句只会返回一个值。
+                - 
+                  db_field: "executeSQL(echo('select count(*) from loan_base where user_id=%s and status in (100,101,102)'), user_id)"
+                  es_field: "loan_count"
+
+                  # eval_on_deleted的含义是当前的赋值操作是否只在mysql数据行进行delete的时候触发。
+                  # delete可以是硬删除（执行了DELETE的SQL语句），也可以是软删除（update status）
+                  # eval_on_deleted默认是False。
+                  eval_on_deleted: True
+                  null_value: 0
+                - 
+                  db_field: "executeSQL(echo('select count(*) from loan_base where user_id=%s and status in (100)'), user_id)"
+                  es_field: "unrepaid_loan_count"
+                  eval_on_deleted: True
+                  null_value: 0
