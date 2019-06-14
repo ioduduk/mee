@@ -1,0 +1,11 @@
+configparser==3.5.0
+pyyaml==3.13
+simplejson==3.8.2
+PyMySQL==0.8.0
+elasticsearch>=6.0.0,<7.0.0
+elasticsearch-dsl>=6.0.0,<7.0.0
+confluent-kafka==0.11.5
+redis==2.10.6
+redlock-py==1.0.8
+python-dateutil==2.6.1
+zope.interface==4.5.0
