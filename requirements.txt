@@ -1,5 +1,5 @@
 configparser==3.5.0
-pyyaml==3.13
+pyyaml==5.1
 simplejson==3.8.2
 PyMySQL==0.8.0
 elasticsearch>=6.0.0,<7.0.0
